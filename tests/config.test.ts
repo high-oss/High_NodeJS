@@ -56,6 +56,27 @@ describe('resolveConfig', () => {
       .toThrow(/staging.*production.*sandbox/s);
   });
 
+  it('defaults logging to silent — a library must not print uninvited', () => {
+    expect(resolveConfig({}, {}).logLevel).toBe('silent');
+  });
+
+  it('takes a log level from options or HIGH_LOG_LEVEL, options winning', () => {
+    expect(resolveConfig({ logLevel: 'debug' }, {}).logLevel).toBe('debug');
+    expect(resolveConfig({}, { HIGH_LOG_LEVEL: 'warn' }).logLevel).toBe('warn');
+    expect(resolveConfig({ logLevel: 'info' }, { HIGH_LOG_LEVEL: 'warn' }).logLevel).toBe('info');
+  });
+
+  it('rejects an unknown log level at construction, naming the valid values', () => {
+    expect(() => resolveConfig({ logLevel: 'verbose' as never }, {}))
+      .toThrow(/verbose.*silent.*error.*warn.*info.*debug/s);
+    expect(() => resolveConfig({}, { HIGH_LOG_LEVEL: 'trace' })).toThrow(/trace/);
+  });
+
+  it('exposes a ready logger honouring that level', () => {
+    expect(resolveConfig({ logLevel: 'warn' }, {}).logger.enabled('warn')).toBe(true);
+    expect(resolveConfig({ logLevel: 'warn' }, {}).logger.enabled('debug')).toBe(false);
+  });
+
   it('rejects an unknown HIGH_ENVIRONMENT value too', () => {
     expect(() => resolveConfig({}, { HIGH_ENVIRONMENT: 'prod' })).toThrow(/prod/);
   });

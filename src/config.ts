@@ -1,6 +1,8 @@
 // Copyright (c) 2026 Truestock
 // SPDX-License-Identifier: MIT
 
+import { createLogger, LOG_LEVELS, type LogLevel, type Logger, type LogSink } from './logger.js';
+
 /**
  * The hosts for each environment. `api` comes from the spec's `servers` block,
  * by its `x-environment` name.
@@ -37,6 +39,14 @@ export interface HighClientOptions {
   maxRetries?: number;
   /** Appended to the SDK's own User-Agent. */
   userAgent?: string;
+  /**
+   * How much the SDK prints. Each level prints itself and everything more
+   * severe. Default: `silent`. Credentials and TOTPs are redacted at every
+   * level.
+   */
+  logLevel?: LogLevel;
+  /** Where log lines go. Default: `console`. */
+  logSink?: LogSink;
   /** Transport override, for tests or a proxy-aware fetch. */
   fetch?: typeof globalThis.fetch;
 }
@@ -51,6 +61,9 @@ export interface ResolvedConfig {
   timeoutMs: number;
   maxRetries: number;
   userAgent: string;
+  logLevel: LogLevel;
+  /** Ready to use; already honours `logLevel`. */
+  logger: Logger;
   fetch: typeof globalThis.fetch;
 }
 
@@ -60,6 +73,14 @@ function assertEnvironment(value: string, source: string): asserts value is Envi
   if (!(value in ENVIRONMENTS)) {
     const valid = Object.keys(ENVIRONMENTS).join(', ');
     throw new Error(`Unknown HIGH environment "${value}" (${source}). Valid values: ${valid}.`);
+  }
+}
+
+function assertLogLevel(value: string, source: string): asserts value is LogLevel {
+  if (!(LOG_LEVELS as readonly string[]).includes(value)) {
+    throw new Error(
+      `Unknown HIGH log level "${value}" (${source}). Valid values: ${LOG_LEVELS.join(', ')}.`,
+    );
   }
 }
 
@@ -97,7 +118,19 @@ export function resolveConfig(
     ? `${DEFAULT_USER_AGENT} ${options.userAgent}`
     : DEFAULT_USER_AGENT;
 
+  let logLevel: LogLevel = 'silent';
+  if (options.logLevel !== undefined) {
+    assertLogLevel(options.logLevel, 'options.logLevel');
+    logLevel = options.logLevel;
+  } else if (env.HIGH_LOG_LEVEL) {
+    const fromEnv = env.HIGH_LOG_LEVEL;
+    assertLogLevel(fromEnv, 'HIGH_LOG_LEVEL');
+    logLevel = fromEnv;
+  }
+
   return {
+    logLevel,
+    logger: createLogger(logLevel, options.logSink),
     baseUrl: baseUrl.replace(/\/+$/, ''),
     wsBaseUrl: wsBaseUrl.replace(/\/+$/, ''),
     versionPath: trimSlashes(options.versionPath ?? 'v1'),
