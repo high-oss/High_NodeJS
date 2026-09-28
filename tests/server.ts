@@ -46,12 +46,21 @@ export async function startServer(
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const { port } = server.address() as AddressInfo;
 
+  // Idempotent: a suite whose `afterEach` closes a server shared across
+  // describe blocks would otherwise fail with "Server is not running" for any
+  // block that never started one.
+  let closed = false;
+
   return {
     baseUrl: `http://127.0.0.1:${port}`,
     requests,
-    close: () => new Promise<void>((resolve, reject) =>
-      server.close((error) => (error ? reject(error) : resolve())),
-    ),
+    close: () => {
+      if (closed) return Promise.resolve();
+      closed = true;
+      return new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+    },
   };
 }
 
