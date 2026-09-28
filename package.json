@@ -2,7 +2,7 @@
   "name": "@high/openapi",
   "version": "0.0.1",
   "description": "Official Node.js SDK for the HIGH Open API.",
-  "author": "High-OSS <oss@high.live>",
+  "author": "High-OSS <care@high.live>",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,
