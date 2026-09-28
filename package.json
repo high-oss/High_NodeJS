@@ -1,6 +1,6 @@
 {
   "name": "@high/openapi",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "description": "Official Node.js SDK for the HIGH Open API.",
   "license": "MIT",
   "type": "module",
@@ -38,5 +38,25 @@
     "tsup": "8.5.1",
     "typescript": "5.9.3",
     "vitest": "5.0.2"
-  }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/high-live/high-sdk-node.git"
+  },
+  "homepage": "https://openapi.high.live",
+  "bugs": {
+    "url": "https://github.com/high-live/high-sdk-node/issues"
+  },
+  "keywords": [
+    "high",
+    "openapi",
+    "trading",
+    "broker",
+    "sdk",
+    "nse",
+    "bse"
+  ]
 }

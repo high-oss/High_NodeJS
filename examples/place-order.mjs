@@ -34,6 +34,13 @@ try {
     isAMO: false,
   });
 
+  // OrderPlacementResult.error is required and empty on success — an order can
+  // be accepted by the API and still rejected by the exchange.
+  if (placed.error) {
+    console.error('Order rejected:', placed.error);
+    process.exit(1);
+  }
+
   console.log('Order id:', placed.orderId);
 
   const book = await high.orders.get(placed.orderId);

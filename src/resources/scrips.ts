@@ -14,6 +14,13 @@ export type OhlcRequest = Json<paths['/scrips/ohlc']['post']['requestBody']>;
 export type HistoricalRequest = Json<paths['/scrips/historical']['post']['requestBody']>;
 export type OptionChainRequest = Json<paths['/scrips/option-chain']['post']['requestBody']>;
 
+/**
+ * Which derivative family to list expiries for. Taken from the spec's own path
+ * parameter, so widening it here would let a value the API rejects compile.
+ */
+export type ExpiryType =
+  paths['/scrips/{symbol}/{type}/expiries']['get']['parameters']['path']['type'];
+
 export class ScripsResource {
   constructor(private readonly config: ResolvedConfig) {}
 
@@ -35,7 +42,7 @@ export class ScripsResource {
   }
 
   /** Available expiries for a derivative underlying. */
-  expiries(symbol: string, type: string, signal?: AbortSignal): Promise<Schemas['Expiry'][]> {
+  expiries(symbol: string, type: ExpiryType, signal?: AbortSignal): Promise<Schemas['Expiry'][]> {
     return request(this.config, {
       method: 'GET', path: pathOf('/scrips/{symbol}/{type}/expiries', { symbol, type }),
       auth: 'bearer', signal,

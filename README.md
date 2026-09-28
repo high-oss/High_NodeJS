@@ -38,6 +38,7 @@ console.log(funds.availableBalance);
 | `accessToken` | `HIGH_ACCESS_TOKEN` | Sent as `Authorization: Bearer` |
 | `timeoutMs` | `30000` | Per request |
 | `maxRetries` | `2` | Idempotent reads only |
+| `maxRetryDelayMs` | `30000` | Ceiling on one retry delay; a longer `Retry-After` fails fast |
 | `logLevel` | `silent` | `silent`, `error`, `warn`, `info`, `debug` |
 | `logSink` | `console` | Where log lines go |
 | `userAgent` | — | Appended to the SDK's own |
@@ -72,27 +73,11 @@ A HIGH access token lasts 24 hours. The SDK attaches whatever you give it and
 yours to choose. Configuration is settled at construction, so a new token means
 a new client.
 
-### The redirect consent flow is not wrapped
+### What this SDK does not do
 
-If your application signs in *other people's* HIGH accounts, you use the
-redirect consent flow instead. It is built around a browser page only a human
-can complete, so this SDK wraps none of it. Call the three endpoints directly:
-
-```
-1. GET  {baseUrl}/{versionPath}/auth/generate-consent?clientId=…
-        header: x-api-key                    → { consentId }
-
-2.      Redirect the user's browser to
-        {baseUrl}/{versionPath}/auth/login?consentId=…
-        HIGH hosts this page. On success it redirects the browser to the
-        redirect URL registered against your API key, with tokenId appended.
-
-3. GET  {baseUrl}/{versionPath}/auth/consume-consent?tokenId=…
-        header: x-api-key                    → { accessToken, expiresAt }
-```
-
-Pass the resulting `accessToken` to `new HighClient({ accessToken })` and use
-the SDK for everything that follows.
+It wraps the TOTP endpoint and nothing else from the auth area. The redirect
+consent flow and token introspection are not part of the SDK; if you need them,
+call those endpoints directly.
 
 ## Errors
 
@@ -111,6 +96,7 @@ try {
     error.code;       // e.g. 'ORDER_REJECTED' — see ERROR_CODES
     error.requestId;  // quote this in support tickets
     error.messages;   // validation errors return several
+    error.body;       // the parsed payload, for a non-standard error
   }
 }
 ```
@@ -121,8 +107,11 @@ not assume the set is closed.
 
 ## Retries
 
-Retried: `GET` only, on 429 and 5xx, honouring `Retry-After` in both its
-seconds and HTTP-date forms, with exponential backoff otherwise.
+Retried: `GET` and `HEAD` only, on 429, 500, 502, 503 and 504, honouring
+`Retry-After` in both its seconds and HTTP-date forms, with exponential backoff
+otherwise. A `Retry-After` longer than `maxRetryDelayMs` (30s by default) is not
+waited out — the SDK gives up and throws, rather than blocking your call inside
+an `await` you cannot break out of.
 
 Never retried: `POST`, `PATCH` and `DELETE`. A retried `orders.place` would be
 a duplicate order, and a retried square-off would be a second square-off.
@@ -133,9 +122,20 @@ Off by default. Each level prints itself and everything more severe.
 
 ```ts
 const high = new HighClient({ accessToken, logLevel: 'debug' });
-// HIGH -> GET https://openapi.high.live/v1/orders/list
-// HIGH <- 200 in 143ms https://openapi.high.live/v1/orders/list { requestId: 'a1b2c3' }
+// 2026-09-28T17:05:12.345Z DEBUG HIGH -> POST https://openapi.high.live/v1/orders
+//   { body: { tradeSide: 'B', tradingSymbol: 'RELIANCE-EQ', quantity: 1, … } }
+// 2026-09-28T17:05:12.488Z DEBUG HIGH <- 200 in 143ms https://openapi.high.live/v1/orders
+//   { requestId: 'a1b2c3', body: { orderId: '2609250000123456', error: '' } }
 ```
+
+| Level | What it prints |
+|---|---|
+| `error` | API error responses (status, code, requestId), timeouts, transport failures |
+| `warn` | Each retry, and giving up when `Retry-After` exceeds the ceiling |
+| `info` | One line per request: method and URL |
+| `debug` | The above plus request and response bodies, and response timing |
+
+Every line is prefixed with an ISO-8601 timestamp and the level.
 
 Credentials never reach the log. Headers are not logged at all, and the
 `tOtp`, `apiKey`, `accessToken`, `tokenId` and `stepToken` query parameters are
@@ -191,9 +191,8 @@ c.close[0];               // not c[0].close
 
 ## Live datafeed
 
-Not in this release. When the datafeed socket ships it arrives as a separate
-`HighFeed` client alongside `HighClient`, reusing the same configuration and
-credentials. `ENVIRONMENTS` already carries the socket host per environment.
+No socket client ships in this release. `wsBaseUrl` is resolved and exposed on
+the config, but nothing consumes it yet.
 
 ## Regenerating from the spec
 

@@ -44,10 +44,10 @@ describe('scrips resource', () => {
 
   it('expiries returns an array and encodes both parameters', async () => {
     server = await startServer((_req, res) => json(res, 200, ok([{ expiry: '2026-09-29', type: 'M' }])));
-    const expiries = await clientFor(server).scrips.expiries('NIFTY 50', 'OPT');
+    const expiries = await clientFor(server).scrips.expiries('NIFTY 50', 'options');
     expect(expiries).toHaveLength(1);
     expect(expiries[0]?.type).toBe('M');
-    expect(server.requests[0]!.url).toBe('/v1/scrips/NIFTY%2050/OPT/expiries');
+    expect(server.requests[0]!.url).toBe('/v1/scrips/NIFTY%2050/options/expiries');
   });
 
   it('futureData returns an array of scrips', async () => {

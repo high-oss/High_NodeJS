@@ -3,7 +3,7 @@
 
 import { buildUrl, type ResolvedConfig } from './config.js';
 import { errorFromResponse, HighApiError } from './errors.js';
-import { redactUrl } from './logger.js';
+import { redactBody, redactUrl } from './logger.js';
 
 export type AuthKind = 'bearer' | 'apiKey';
 
@@ -91,13 +91,26 @@ async function attempt(
   options.signal?.addEventListener('abort', onCallerAbort, { once: true });
 
   let timedOut = false;
+  // One timer for the whole exchange, headers AND body: clearing it when fetch
+  // resolves would leave a stalled body read unbounded, which is how a
+  // slow-loris upstream hangs a call that documents a 30s ceiling.
   const timer = setTimeout(() => {
     timedOut = true;
     controller.abort();
   }, config.timeoutMs);
+  const settle = () => {
+    clearTimeout(timer);
+    options.signal?.removeEventListener('abort', onCallerAbort);
+  };
 
   // Headers are never logged — they carry the bearer token and the api key.
-  config.logger.debug(`HIGH -> ${options.method.toUpperCase()} ${redactUrl(url)}`);
+  // The body is, with credential-shaped keys masked and oversized payloads
+  // replaced by a note, so `debug` shows what was called and what was sent.
+  config.logger.debug(
+    `HIGH -> ${options.method.toUpperCase()} ${redactUrl(url)}`,
+    options.body === undefined ? undefined : { body: redactBody(options.body) },
+  );
+  config.logger.info(`HIGH ${options.method.toUpperCase()} ${redactUrl(url)}`);
 
   const startedAt = Date.now();
   let response: Response;
@@ -109,6 +122,7 @@ async function attempt(
       signal: controller.signal,
     });
   } catch (cause) {
+    settle();
     if (timedOut) {
       config.logger.error(`HIGH <- timeout after ${config.timeoutMs}ms ${redactUrl(url)}`);
       throw new HighApiError(`Request timed out after ${config.timeoutMs}ms`, { status: 0, body: cause });
@@ -118,12 +132,28 @@ async function attempt(
     if (options.signal?.aborted) throw options.signal.reason ?? cause;
     config.logger.error(`HIGH <- transport failure ${redactUrl(url)}`, (cause as Error).message);
     throw new HighApiError(`Request failed: ${(cause as Error).message}`, { status: 0, body: cause });
-  } finally {
-    clearTimeout(timer);
-    options.signal?.removeEventListener('abort', onCallerAbort);
   }
 
-  const text = await response.text();
+  let text: string;
+  try {
+    text = await response.text();
+  } catch (cause) {
+    settle();
+    if (timedOut) {
+      config.logger.error(`HIGH <- body timeout after ${config.timeoutMs}ms ${redactUrl(url)}`);
+      throw new HighApiError(
+        `Request timed out after ${config.timeoutMs}ms while reading the response body`,
+        { status: 0, body: cause },
+      );
+    }
+    if (options.signal?.aborted) throw options.signal.reason ?? cause;
+    throw new HighApiError(`Failed to read the response body: ${(cause as Error).message}`, {
+      status: response.status,
+      body: cause,
+    });
+  } finally {
+    settle();
+  }
   let parsed: unknown;
   let parseFailed = false;
   if (text !== '') {
@@ -138,16 +168,25 @@ async function attempt(
     ? undefined
     : (parsed as { requestId?: string; data?: unknown } | undefined);
 
-  config.logger.debug(
-    `HIGH <- ${response.status} in ${Date.now() - startedAt}ms ${redactUrl(url)}`,
-    envelope?.requestId ? { requestId: envelope.requestId } : undefined,
-  );
+  const elapsedMs = Date.now() - startedAt;
+
+  config.logger.debug(`HIGH <- ${response.status} in ${elapsedMs}ms ${redactUrl(url)}`, {
+    requestId: envelope?.requestId,
+    body: redactBody(parseFailed ? text.slice(0, 200) : parsed),
+  });
 
   if (!response.ok) {
+    const error = errorFromResponse(response.status, parseFailed ? undefined : parsed, text);
+    // An API error is the caller's problem to handle, but it is still an error
+    // worth a line at the level named for it.
+    config.logger.error(
+      `HIGH <- ${response.status} ${error.code ?? 'no code'} in ${elapsedMs}ms ${redactUrl(url)}`,
+      { requestId: error.requestId, messages: error.messages },
+    );
     return {
       status: response.status,
       data: undefined,
-      error: errorFromResponse(response.status, parseFailed ? undefined : parsed, text),
+      error,
       retryAfterMs: retryAfterMs(response.headers.get('retry-after')),
     };
   }
@@ -172,7 +211,28 @@ const RETRYABLE = new Set([429, 500, 502, 503, 504]);
 /** Only reads are retried. A retried POST /orders would be a duplicate order. */
 const IDEMPOTENT = new Set(['GET', 'HEAD']);
 
-const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+/**
+ * Waits `ms`, or rejects as soon as `signal` aborts. An unabortable sleep would
+ * let a cancelled call go on to issue its next retry, which is exactly what a
+ * caller asked not to happen.
+ */
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason ?? new Error('Aborted'));
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    function onAbort() {
+      clearTimeout(timer);
+      reject(signal?.reason ?? new Error('Aborted'));
+    }
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
 
 /**
  * Sends one operation and returns its unwrapped `data`.
@@ -198,10 +258,22 @@ export async function request<T>(config: ResolvedConfig, options: RequestOptions
 
     const backoff = 250 * 2 ** index + Math.floor(Math.random() * 100);
     const delay = last.retryAfterMs ?? backoff;
+
+    // A Retry-After past the ceiling means "come back much later", not "block
+    // this call". A misconfigured rate limiter or an edge WAF can legally send
+    // Retry-After: 86400, and waiting it out inside an await the caller cannot
+    // break is worse than failing now.
+    if (delay > config.maxRetryDelayMs) {
+      config.logger.warn(
+        `HIGH giving up: server asked for ${delay}ms, over the ${config.maxRetryDelayMs}ms ceiling ${redactUrl(url)}`,
+      );
+      break;
+    }
+
     config.logger.warn(
       `HIGH retry ${index + 1}/${maxAttempts - 1} after ${delay}ms (HTTP ${last.status}) ${redactUrl(url)}`,
     );
-    await sleep(delay);
+    await sleep(delay, options.signal);
   }
 
   throw last!.error;

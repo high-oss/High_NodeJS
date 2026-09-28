@@ -37,6 +37,11 @@ export interface HighClientOptions {
   timeoutMs?: number;
   /** Retries for idempotent reads only. Default: 2. */
   maxRetries?: number;
+  /**
+   * Ceiling on a single retry delay. A `Retry-After` longer than this is not
+   * waited out — the SDK gives up and throws instead. Default: 30000.
+   */
+  maxRetryDelayMs?: number;
   /** Appended to the SDK's own User-Agent. */
   userAgent?: string;
   /**
@@ -60,6 +65,7 @@ export interface ResolvedConfig {
   accessToken?: string;
   timeoutMs: number;
   maxRetries: number;
+  maxRetryDelayMs: number;
   userAgent: string;
   logLevel: LogLevel;
   /** Ready to use; already honours `logLevel`. */
@@ -67,7 +73,7 @@ export interface ResolvedConfig {
   fetch: typeof globalThis.fetch;
 }
 
-const DEFAULT_USER_AGENT = 'high-sdk-node/0.1.0';
+const DEFAULT_USER_AGENT = 'high-sdk-node/0.0.1';
 
 function assertEnvironment(value: string, source: string): asserts value is Environment {
   if (!(value in ENVIRONMENTS)) {
@@ -111,8 +117,17 @@ export function resolveConfig(
   }
 
   const hosts = ENVIRONMENTS[environment];
-  const baseUrl = options.baseUrl ?? env.HIGH_BASE_URL ?? hosts.api;
-  const wsBaseUrl = options.wsBaseUrl ?? env.HIGH_WS_BASE_URL ?? hosts.ws;
+
+  // An explicit `environment` suppresses the env-var hosts. Otherwise a
+  // HIGH_BASE_URL left in a shell profile from a mock-server session would
+  // silently route a client written as `environment: 'sandbox'` at production,
+  // and could leave the REST host on one environment and the socket host on
+  // the other. Only an explicit URL option outranks an explicit environment.
+  const explicitEnvironment = options.environment !== undefined;
+  const baseUrl =
+    options.baseUrl ?? (explicitEnvironment ? hosts.api : env.HIGH_BASE_URL ?? hosts.api);
+  const wsBaseUrl =
+    options.wsBaseUrl ?? (explicitEnvironment ? hosts.ws : env.HIGH_WS_BASE_URL ?? hosts.ws);
 
   const userAgent = options.userAgent
     ? `${DEFAULT_USER_AGENT} ${options.userAgent}`
@@ -128,19 +143,55 @@ export function resolveConfig(
     logLevel = fromEnv;
   }
 
-  return {
+  // Validated here rather than mid-request, so a bad number cannot surface as a
+  // raw TypeError from deep inside the retry loop.
+  const timeoutMs = requirePositive(options.timeoutMs ?? 30_000, 'timeoutMs');
+  const maxRetries = requireNonNegative(options.maxRetries ?? 2, 'maxRetries');
+  const maxRetryDelayMs = requirePositive(options.maxRetryDelayMs ?? 30_000, 'maxRetryDelayMs');
+
+  const config: ResolvedConfig = {
     logLevel,
     logger: createLogger(logLevel, options.logSink),
     baseUrl: baseUrl.replace(/\/+$/, ''),
     wsBaseUrl: wsBaseUrl.replace(/\/+$/, ''),
     versionPath: trimSlashes(options.versionPath ?? 'v1'),
-    apiKey: options.apiKey ?? env.HIGH_API_KEY,
-    accessToken: options.accessToken ?? env.HIGH_ACCESS_TOKEN,
-    timeoutMs: options.timeoutMs ?? 30_000,
-    maxRetries: options.maxRetries ?? 2,
+    timeoutMs,
+    maxRetries,
+    maxRetryDelayMs,
     userAgent,
     fetch: options.fetch ?? globalThis.fetch,
   };
+
+  // Credentials are defined non-enumerably so they survive neither
+  // JSON.stringify nor util.inspect nor a crash reporter walking the client.
+  // They are still ordinary property reads for the SDK itself.
+  defineSecret(config, 'apiKey', options.apiKey ?? env.HIGH_API_KEY);
+  defineSecret(config, 'accessToken', options.accessToken ?? env.HIGH_ACCESS_TOKEN);
+
+  return config;
+}
+
+function requirePositive(value: number, name: string): number {
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new Error(`${name} must be a positive number, received ${value}.`);
+  }
+  return value;
+}
+
+function requireNonNegative(value: number, name: string): number {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error(`${name} must be a non-negative integer, received ${value}.`);
+  }
+  return value;
+}
+
+function defineSecret(target: ResolvedConfig, key: 'apiKey' | 'accessToken', value?: string): void {
+  Object.defineProperty(target, key, {
+    value,
+    enumerable: false,
+    writable: false,
+    configurable: true,
+  });
 }
 
 /** `baseUrl` + `versionPath` + operation path, with no doubled or missing slashes. */

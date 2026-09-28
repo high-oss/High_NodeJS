@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 import { describe, expect, it, vi } from 'vitest';
-import { createLogger, LOG_LEVELS, redactUrl } from '../src/logger.js';
+import { createLogger, LOG_LEVELS, redactBody, redactUrl } from '../src/logger.js';
 
 const sink = () => {
   const lines: Array<{ level: string; message: string; detail?: unknown }> = [];
@@ -94,5 +94,58 @@ describe('redaction', () => {
 
   it('returns a malformed URL unchanged rather than throwing', () => {
     expect(redactUrl('not a url')).toBe('not a url');
+  });
+});
+
+describe('timestamps', () => {
+  it('prefixes every line with an ISO-8601 timestamp and the level', () => {
+    const { lines, logger } = sink();
+    createLogger('debug', logger).warn('something happened');
+    expect(lines[0]!.message).toMatch(
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z WARN {2}something happened$/,
+    );
+  });
+
+  it('pads the level so lines align in a terminal', () => {
+    const { lines, logger } = sink();
+    const log = createLogger('debug', logger);
+    log.error('a');
+    log.debug('b');
+    const levels = lines.map((l) => l.message.split('Z ')[1]!.split(' ')[0]);
+    expect(levels).toEqual(['ERROR', 'DEBUG']);
+    const columns = lines.map((l) => l.message.indexOf(l.message.trim().slice(-1)));
+    expect(new Set(columns).size).toBe(1);
+  });
+});
+
+describe('redactBody', () => {
+  it('masks credential-shaped keys at any depth', () => {
+    const safe = redactBody({
+      tradingSymbol: 'RELIANCE-EQ',
+      nested: { accessToken: 'SECRET', tOtp: '123456', apiKey: 'K', password: 'p', pin: '1234' },
+    }) as Record<string, Record<string, string>>;
+    expect(safe.tradingSymbol).toBe('RELIANCE-EQ');
+    for (const key of ['accessToken', 'tOtp', 'apiKey', 'password', 'pin']) {
+      expect(safe.nested![key]).toBe('REDACTED');
+    }
+  });
+
+  it('walks arrays', () => {
+    const safe = redactBody([{ tOtp: '1' }, { quantity: 10 }]) as Array<Record<string, unknown>>;
+    expect(safe[0]!.tOtp).toBe('REDACTED');
+    expect(safe[1]!.quantity).toBe(10);
+  });
+
+  it('truncates a large payload rather than filling the log', () => {
+    const big = { symbols: Array.from({ length: 500 }, (_, i) => `SYM${i}-EQ`) };
+    const safe = JSON.stringify(redactBody(big));
+    expect(safe.length).toBeLessThan(2000);
+    expect(safe).toContain('truncated');
+  });
+
+  it('passes primitives and null through', () => {
+    expect(redactBody(undefined)).toBeUndefined();
+    expect(redactBody(null)).toBeNull();
+    expect(redactBody(42)).toBe(42);
   });
 });

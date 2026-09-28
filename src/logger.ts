@@ -51,9 +51,59 @@ export function redactUrl(url: string): string {
   return touched ? parsed.toString() : url;
 }
 
+/**
+ * Object keys whose values must never be logged, whatever nesting they sit at.
+ * Query parameters are handled by `redactUrl`; this covers request and response
+ * bodies, which is where a future endpoint could start carrying a secret.
+ */
+const SENSITIVE_KEYS = new Set([
+  'tOtp', 'totp', 'otp', 'apiKey', 'accessToken', 'refreshToken',
+  'tokenId', 'stepToken', 'password', 'pin', 'authorization',
+]);
+
+/** Above this, a logged payload is replaced by a note rather than printed. */
+const MAX_LOGGED_JSON = 1500;
+
+/**
+ * Deep-copies a payload for logging, masking credential-shaped keys and
+ * replacing anything oversized with a note. Returns primitives untouched.
+ */
+export function redactBody(value: unknown): unknown {
+  if (value === null || value === undefined || typeof value !== 'object') return value;
+
+  const mask = (input: unknown): unknown => {
+    if (Array.isArray(input)) return input.map(mask);
+    if (input === null || typeof input !== 'object') return input;
+    return Object.fromEntries(
+      Object.entries(input as Record<string, unknown>).map(([key, nested]) => [
+        key,
+        SENSITIVE_KEYS.has(key) ? 'REDACTED' : mask(nested),
+      ]),
+    );
+  };
+
+  const masked = mask(value);
+
+  let serialised: string;
+  try {
+    serialised = JSON.stringify(masked) ?? '';
+  } catch {
+    return '[unserialisable]';
+  }
+  if (serialised.length > MAX_LOGGED_JSON) {
+    return `[truncated: ${serialised.length} bytes of JSON]`;
+  }
+  return masked;
+}
+
 const RANK: Record<LogLevel, number> = {
   silent: 0, error: 1, warn: 2, info: 3, debug: 4,
 };
+
+/** `2026-09-28T17:05:12.345Z DEBUG message` — sortable, and aligned in a terminal. */
+function format(level: Exclude<LogLevel, 'silent'>, message: string): string {
+  return `${new Date().toISOString()} ${level.toUpperCase().padEnd(5)} ${message}`;
+}
 
 const CONSOLE_SINK: LogSink = {
   error: (m, d) => (d === undefined ? console.error(m) : console.error(m, d)),
@@ -73,9 +123,9 @@ export function createLogger(level: LogLevel, sink: LogSink = CONSOLE_SINK): Log
 
   return {
     enabled,
-    error: (m, d) => { if (enabled('error')) sink.error(m, d); },
-    warn: (m, d) => { if (enabled('warn')) sink.warn(m, d); },
-    info: (m, d) => { if (enabled('info')) sink.info(m, d); },
-    debug: (m, d) => { if (enabled('debug')) sink.debug(m, d); },
+    error: (m, d) => { if (enabled('error')) sink.error(format('error', m), d); },
+    warn: (m, d) => { if (enabled('warn')) sink.warn(format('warn', m), d); },
+    info: (m, d) => { if (enabled('info')) sink.info(format('info', m), d); },
+    debug: (m, d) => { if (enabled('debug')) sink.debug(format('debug', m), d); },
   };
 }
