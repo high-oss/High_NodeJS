@@ -32,7 +32,7 @@ console.log(funds.availableBalance);
 |---|---|---|
 | `environment` | `production` | `production` or `sandbox` |
 | `baseUrl` | from `environment` | Overrides the REST host |
-| `wsBaseUrl` | from `environment` | Datafeed socket host, reserved for the feed client |
+| `wsBaseUrl` | from `environment` | Datafeed socket host, used by `HighFeed` |
 | `versionPath` | `v1` | The segment between host and operation path |
 | `apiKey` | `HIGH_API_KEY` | Sent as `x-api-key`, for `auth.generateAccessToken` |
 | `accessToken` | `HIGH_ACCESS_TOKEN` | Sent as `Authorization: Bearer` |
@@ -246,8 +246,91 @@ const rows = await high.instruments.list('all', { timeoutMs: 120_000 });
 
 ## Live datafeed
 
-No socket client ships in this release. `wsBaseUrl` is resolved and exposed on
-the config, but nothing consumes it yet.
+`HighFeed` is a second client, separate from `HighClient`, built from the same
+options and credentials. It streams live quotes, market depth and index
+values over a WebSocket.
+
+**Production only.** There is no sandbox datafeed — a client configured
+`environment: 'sandbox'` throws at construction rather than quietly landing on
+production.
+
+```ts
+import { HighFeed } from '@high/openapi';
+
+const feed = new HighFeed({ accessToken: process.env.HIGH_ACCESS_TOKEN });
+
+await feed.connect();
+await feed.subscribeQuotes(['NSE@2885']); // RELIANCE
+await feed.subscribeDepth(['NSE@2885']); // five-level book
+await feed.subscribeIndices(['NSE@26000']); // Nifty 50
+
+feed.on('quote', ({ scripKey, data, changedFields }) => {
+  console.log(scripKey, data.lastTradedPrice, [...changedFields]);
+});
+
+// Or consume everything — quotes, depth and index ticks — as one stream:
+for await (const tick of feed) {
+  if (tick.kind === 'quote') console.log(tick.data.lastTradedPrice);
+}
+
+await feed.close();
+```
+
+Subscribe with your own HIGH scrip keys (`NSE@2885`, `BSE@532540`, …) — the
+feed's own identifiers never appear anywhere on this surface. Three pairs of
+methods, one per kind, plus a matching `snapshotX`:
+
+| Methods | What they deliver |
+|---|---|
+| `subscribeQuotes` / `unsubscribeQuotes` / `snapshotQuotes` | Market-watch fields, plus a one-level top-of-book split out into its own `depth` event |
+| `subscribeDepth` / `unsubscribeDepth` / `snapshotDepth` | The full five-level book |
+| `subscribeIndices` / `unsubscribeIndices` / `snapshotIndices` | Index value and session change |
+
+You subscribe to an index deliberately: `subscribeIndices` accepts only the
+committed index keys (`NSE@26000`, `BSE@19000`, …), and `subscribeQuotes` /
+`subscribeDepth` reject one, pointing you at `subscribeIndices` instead —
+letting an index key fall through to the touchline or depth channel would
+silently subscribe to a token the feed doesn't recognise, and it would simply
+never tick. A handful of scripKeys (six, at last count) resolve to more than
+one index in the scrip master itself; subscribing to one of those fails with
+an error naming every candidate, rather than picking one.
+
+Every method takes an array of scrip keys and splits large requests to honour
+the server-declared `maxScripPerReq`; `connect()` reads `maxScripPerConn` too,
+and a subscription that would exceed it is refused with a clear error rather
+than silently dropped by the server.
+
+**Typed models.** `Quote`, `Depth` and `IndexTick`, one per kind, with fields
+named for what they are (`lastTradedPrice`, `changePercent`, `bestBidPrice`,
+…) rather than the feed's own short wire keys. Prices arrive as decimal
+strings and stay strings — never parsed to a binary float — and timestamps
+(`lastTradedTime`, `feedTime`) are IST wall-clock, parsed to `Date`. Every
+event also carries `changedFields`, the set of fields this particular tick
+actually touched, since only changed fields arrive on the wire and the SDK
+delivers a complete merged snapshot on every tick regardless.
+
+A `Depth` says how many levels it holds: `levels: 1` for the top-of-book split
+out of a quote tick, `levels: 5` for a dedicated depth subscription. One is
+never presented as the other with empty rows.
+
+**Delivery** is both an event emitter (`quote` / `depth` / `index` /
+`connected` / `disconnected` / `reconnecting` / `error`) and an `AsyncIterable`
+over every tick — use whichever fits your code, or both; every tick reaches
+both.
+
+**Errors.** `HighFeedAuthError` — thrown by `connect()`, never retried or
+reconnected — carries `stCode`, `msg` and a named `reason` (`noDataPlan`,
+`invalidToken`, `malformedRequest`, or `unknown`) for the cases the gateway's
+`cn` acknowledgement can reject with. Everything else `HighFeed` refuses (an
+unrecognised scrip key, a limit that would be exceeded, a call before
+`connect()`) throws `HighFeedError`.
+
+**Reconnection.** A transport-level drop — never an auth rejection — triggers
+an automatic reconnect with backoff, which re-authenticates and re-subscribes
+everything before the client reports itself connected again.
+
+`ws` is the one runtime dependency this adds to the package (previously zero);
+it is not used by `HighClient` or any REST resource.
 
 ## Regenerating from the spec
 
@@ -260,6 +343,13 @@ npm run regenerate   # rewrites generated/ from that commit
 `generated/` is committed and never hand-edited. To move to a newer contract,
 update `spec.lock.json`, regenerate, and commit both.
 
+`src/feed/index-map.generated.ts` — the datafeed's index-name table — has its
+own generator, from the committed `src/feed/index-feed-map.json`:
+
+```bash
+npm run regenerate:index-map
+```
+
 ## Development
 
 ```bash
@@ -268,7 +358,9 @@ npm run check   # typecheck + test + build
 ```
 
 Tests run against a real local HTTP server rather than a mocked `fetch`, so a
-change in how requests are built is caught rather than asserted around.
+change in how requests are built is caught rather than asserted around. The
+datafeed's tests (`tests/feed/`) hold to the same rule against a real local
+WebSocket server — never a mocked socket.
 
 ## Licence
 

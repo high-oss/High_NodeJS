@@ -27,4 +27,13 @@ export type {
   ExpiryType, HistoricalRequest, OhlcRequest, OptionChainRequest, QuotesRequest,
 } from './resources/scrips.js';
 
+export { HighFeed } from './feed/feed.js';
+export type { HighFeedEventMap } from './feed/feed.js';
+export { HighFeedAuthError, HighFeedError } from './feed/errors.js';
+export type { FeedAuthFailureReason } from './feed/errors.js';
+export type {
+  Depth, DepthLevel, DepthTickEvent, FeedKind, FeedTickEvent,
+  IndexTick, IndexTickEvent, Quote, QuoteTickEvent,
+} from './feed/models.js';
+
 export type { components, paths } from '../generated/openapi.js';

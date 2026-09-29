@@ -7,15 +7,15 @@ import { createLogger, LOG_LEVELS, type LogLevel, type Logger, type LogSink } fr
  * The hosts for each environment. `api` comes from the spec's `servers` block,
  * by its `x-environment` name.
  *
- * `ws` is the datafeed socket host, reserved for the feed client that lands in
- * its own plan. It is declared here so the feed reuses this configuration and
- * these credentials rather than introducing a second config surface. Until the
- * socket contract exists, treat `ws` as provisional and override it with the
- * `wsBaseUrl` option.
+ * `ws` is the datafeed socket host, used by `HighFeed`, which reuses this
+ * configuration and these credentials rather than introducing a second config
+ * surface. There is no sandbox feed — `HighFeed` refuses construction outright
+ * for a sandbox-configured client, so `sandbox.ws` is never dialled; it is
+ * left empty rather than pointing anywhere real.
  */
 export const ENVIRONMENTS = {
-  production: { api: 'https://openapi.high.live', ws: 'wss://openapi.high.live' },
-  sandbox: { api: 'https://sandbox.high.live', ws: 'wss://sandbox.high.live' },
+  production: { api: 'https://openapi.high.live', ws: 'wss://openapi-feed.high.live' },
+  sandbox: { api: 'https://sandbox.high.live', ws: '' },
 } as const;
 
 export type Environment = keyof typeof ENVIRONMENTS;
@@ -32,7 +32,7 @@ export interface HighClientOptions {
   environment?: Environment;
   /** Overrides `environment` entirely. Use for a staging host or a local mock. */
   baseUrl?: string;
-  /** Datafeed socket host. Reserved for the feed client; overrides `environment`. */
+  /** Datafeed socket host, used by `HighFeed`. Overrides `environment`. */
   wsBaseUrl?: string;
   /** API version segment between the host and the operation path. Default: `v1`. */
   versionPath?: string;
@@ -70,8 +70,14 @@ export interface HighClientOptions {
 }
 
 export interface ResolvedConfig {
+  /**
+   * Which environment was resolved, purely so a consumer (namely `HighFeed`)
+   * can act on it without re-deriving it. `baseUrl` and `wsBaseUrl` are the
+   * hosts that actually get used — this is not itself a host.
+   */
+  environment: Environment;
   baseUrl: string;
-  /** Reserved for the datafeed client. Unused by the REST resources. */
+  /** Used by `HighFeed`. Unused by the REST resources. */
   wsBaseUrl: string;
   versionPath: string;
   apiKey?: string;
@@ -168,6 +174,7 @@ export function resolveConfig(
   );
 
   const config: ResolvedConfig = {
+    environment,
     logLevel,
     logger: createLogger(logLevel, options.logSink),
     baseUrl: baseUrl.replace(/\/+$/, ''),

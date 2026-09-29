@@ -14,6 +14,19 @@ describe('public surface', () => {
     expect(sdk.ENVIRONMENTS.sandbox.api).toBe('https://sandbox.high.live');
   });
 
+  it('exports HighFeed and its error types alongside HighClient', () => {
+    expect(typeof sdk.HighFeed).toBe('function');
+    expect(typeof sdk.HighFeedError).toBe('function');
+    expect(typeof sdk.HighFeedAuthError).toBe('function');
+  });
+
+  it('resolves the production datafeed host without ever dialling it', () => {
+    // This is a unit assertion on the resolved config, not a connection —
+    // HighFeed tests exclusively against a local WebSocket server (tests/feed/).
+    expect(sdk.ENVIRONMENTS.production.ws).toBe('wss://openapi-feed.high.live');
+    expect(sdk.resolveConfig({}, {}).wsBaseUrl).toBe('wss://openapi-feed.high.live');
+  });
+
   it('wraps neither the browser login page, the consent flow, nor introspection', () => {
     const client = new sdk.HighClient({ accessToken: 'tok' });
     const auth = client.auth as unknown as Record<string, unknown>;
@@ -54,10 +67,12 @@ describe('public surface', () => {
     expect(count).toBe(26);
   });
 
-  it('ships no runtime dependencies', async () => {
+  it('ships exactly one runtime dependency: ws, for the datafeed socket', async () => {
     const { readFileSync } = await import('node:fs');
     const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
-    expect(Object.keys(pkg.dependencies ?? {})).toEqual([]);
+    // The REST client itself still has none — this is HighFeed's only dependency,
+    // added deliberately (see the README's "Live datafeed" section).
+    expect(Object.keys(pkg.dependencies ?? {})).toEqual(['ws']);
     expect(pkg.name).toBe('@high/openapi');
   });
 });

@@ -31,10 +31,15 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "regenerate": "node scripts/regenerate.mjs",
+    "regenerate:index-map": "node scripts/generate-index-map.mjs",
     "check": "npm run typecheck && npm run test && npm run build"
+  },
+  "dependencies": {
+    "ws": "8.22.0"
   },
   "devDependencies": {
     "@types/node": "26.6.3",
+    "@types/ws": "8.18.1",
     "openapi-typescript": "7.13.0",
     "tsup": "8.5.1",
     "typescript": "5.9.3",
@@ -58,6 +63,8 @@
     "broker",
     "sdk",
     "nse",
-    "bse"
+    "bse",
+    "datafeed",
+    "websocket"
   ]
 }
