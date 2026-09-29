@@ -43,6 +43,7 @@ console.log(funds.availableBalance);
 | `logSink` | `console` | Where log lines go |
 | `userAgent` | — | Appended to the SDK's own |
 | `fetch` | global `fetch` | Transport override |
+| `instrumentsAllowedHosts` | the CDN HIGH publishes from | Hosts `instruments` may download from |
 
 Host resolution order: explicit `baseUrl`, then explicit `environment`, then
 `HIGH_BASE_URL`, then `HIGH_ENVIRONMENT`, then production. An unknown
@@ -155,7 +156,8 @@ await high.scrips.quotes({ symbols: ['RELIANCE-EQ'] }, controller.signal);
 
 ## Resources
 
-24 operations across five namespaces.
+24 operations across five authenticated namespaces, plus the credential-free
+instrument list.
 
 | Namespace | Methods |
 |---|---|
@@ -164,6 +166,7 @@ await high.scrips.quotes({ symbols: ['RELIANCE-EQ'] }, controller.signal);
 | `portfolio` | `positions` · `holdings` · `funds` · `convertPosition` · `exitAllPositions` · `exitPosition` |
 | `scrips` | `quotes` · `ohlc` · `depth` · `expiries` · `futureData` · `historical` · `optionChain` |
 | `market` | `status` |
+| `instruments` | `stream` · `list` |
 
 Each method returns the response's `data` — the `{requestId, data}` envelope is
 unwrapped for you, and `requestId` reaches you on the error.
@@ -187,6 +190,58 @@ c.close[0];               // not c[0].close
 // positions and holdings both have `snapshot`, with different shapes
 (await high.portfolio.positions()).snapshot.totalPL;
 (await high.portfolio.holdings()).snapshot.investment;
+```
+
+### Instrument list
+
+The scrip master — every instrument HIGH knows, as a CSV — in five categories:
+`all`, `equity`, `derivatives`, `commodity`, `etfs`. It needs no `apiKey` and no
+`accessToken`; it is public data, so `instruments` works on a client built with
+no credentials at all.
+
+`stream` is the primary form — an `AsyncIterable` that parses rows as they
+arrive rather than holding the whole file in memory. `all` and `derivatives`
+are tens of megabytes; prefer `stream` for those. `list` materialises an array
+and suits the smaller categories.
+
+```ts
+for await (const row of high.instruments.stream('equity')) {
+  console.log(row.highTradingSymbol, row.symbol, row.lotSize);
+}
+
+const commodities = await high.instruments.list('commodity');
+```
+
+Every row has these 17 fields. Blank cells come through as `undefined`, never
+an empty string:
+
+| Field | Type | Notes |
+|---|---|---|
+| `exchange` | `string` | |
+| `segment` | `string` | |
+| `instrument` | `string` | The scrip's own type (e.g. equity, future, option) |
+| `highTradingSymbol` | `string` | |
+| `scripKey` | `string` | |
+| `isin` | `string?` | Equity only |
+| `scripCode` | `number` | Integer, broker-assigned |
+| `symbol` | `string` | |
+| `name` | `string` | May contain commas — parsed properly, not by splitting on `,` |
+| `groupSeries` | `string?` | |
+| `hasFno` | `number` | `1` or `0` |
+| `underlyingSymbol` | `string?` | Derivatives only |
+| `expiry` | `string?` | Derivatives only, left as the CSV's own date string |
+| `optionType` | `string?` | Options only |
+| `strikePrice` | `number?` | Options only |
+| `priceTick` | `number` | Integer. Its scale is segment-specific — never rescaled by the SDK |
+| `lotSize` | `number` | Integer |
+
+These files are rebuilt once each trading morning and do not change intraday —
+cache the result yourself rather than calling this on every request. `all` and
+`derivatives` are large downloads (tens of megabytes), so give a call more time
+if your connection or your own row processing needs it:
+
+```ts
+const rows = await high.instruments.list('all', { timeoutMs: 120_000 });
 ```
 
 ## Live datafeed

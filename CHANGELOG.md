@@ -12,6 +12,11 @@ First release. Pre-1.0: the surface may still change.
 
 - `HighClient` covering 24 of the 27 HIGH Open API operations across five
   namespaces: `auth`, `orders`, `portfolio`, `scrips` and `market`.
+- `instruments.stream` and `instruments.list`, covering the instrument list —
+  17 typed fields, five categories (`all`, `equity`, `derivatives`,
+  `commodity`, `etfs`), no credentials required. `stream` parses rows as they
+  arrive rather than buffering the whole file; `instrumentsAllowedHosts`
+  configures which hosts the SDK will download from.
 - Types generated from the canonical OpenAPI contract, pinned by commit in
   `spec.lock.json` and regenerated with `npm run regenerate`.
 - Configuration by `environment` (`production` / `sandbox`) or explicit
