@@ -5,7 +5,13 @@ import { buildUrl, type ResolvedConfig } from './config.js';
 import { errorFromResponse, HighApiError } from './errors.js';
 import { redactBody, redactUrl } from './logger.js';
 
-export type AuthKind = 'bearer' | 'apiKey';
+/**
+ * `none` is for the one operation the spec marks `security: []` — the
+ * instrument list manifest. It is unauthenticated on purpose: the manifest and
+ * the CSVs it points at are public, and attaching a bearer token to a
+ * request a third-party CDN can see would leak it.
+ */
+export type AuthKind = 'bearer' | 'apiKey' | 'none';
 
 export interface RequestOptions {
   method: string;
@@ -39,7 +45,7 @@ function headersFor(config: ResolvedConfig, options: RequestOptions): Headers {
       );
     }
     headers.set('authorization', `Bearer ${config.accessToken}`);
-  } else {
+  } else if (options.auth === 'apiKey') {
     if (!config.apiKey) {
       throw new HighApiError(
         `This operation needs an apiKey. Pass it to the client, or set HIGH_API_KEY.`,
@@ -48,6 +54,7 @@ function headersFor(config: ResolvedConfig, options: RequestOptions): Headers {
     }
     headers.set('x-api-key', config.apiKey);
   }
+  // 'none': no credential is attached, ever — not from config, not from env.
 
   if (options.body !== undefined) headers.set('content-type', 'application/json');
   return headers;
