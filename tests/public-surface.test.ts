@@ -22,9 +22,9 @@ describe('public surface', () => {
     }
   });
 
-  it('exposes all five resources on a constructed client', () => {
+  it('exposes all six resources on a constructed client', () => {
     const client = new sdk.HighClient({ accessToken: 'tok' });
-    for (const name of ['auth', 'orders', 'portfolio', 'scrips', 'market'] as const) {
+    for (const name of ['auth', 'instruments', 'orders', 'portfolio', 'scrips', 'market'] as const) {
       expect(client[name], `client.${name} is missing`).toBeDefined();
     }
   });
@@ -33,6 +33,7 @@ describe('public surface', () => {
     const client = new sdk.HighClient({ accessToken: 'tok' });
     const expected: Record<string, string[]> = {
       auth: ['generateAccessToken'],
+      instruments: ['stream', 'list'],
       orders: ['place', 'modify', 'get', 'cancel', 'list', 'trades', 'tradesFor', 'charges', 'margin'],
       portfolio: ['positions', 'holdings', 'funds', 'convertPosition', 'exitAllPositions', 'exitPosition'],
       scrips: ['quotes', 'ohlc', 'depth', 'expiries', 'futureData', 'historical', 'optionChain'],
@@ -46,9 +47,11 @@ describe('public surface', () => {
         count += 1;
       }
     }
-    // The spec has 27 operations; the SDK covers 24 — login, the two consent
-    // operations and token introspection are deliberately excluded.
-    expect(count).toBe(24);
+    // The spec has 28 operations; the SDK covers 25 of them — login, the two
+    // consent operations and token introspection are deliberately excluded.
+    // The instrument list operation is exposed as two methods (stream, list),
+    // so the method count (26) is one higher than the operation count (25).
+    expect(count).toBe(26);
   });
 
   it('ships no runtime dependencies', async () => {

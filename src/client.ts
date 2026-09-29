@@ -3,6 +3,7 @@
 
 import { type HighClientOptions, resolveConfig, type ResolvedConfig } from './config.js';
 import { AuthResource } from './resources/auth.js';
+import { InstrumentsResource } from './resources/instruments.js';
 import { MarketResource } from './resources/market.js';
 import { OrdersResource } from './resources/orders.js';
 import { PortfolioResource } from './resources/portfolio.js';
@@ -21,6 +22,7 @@ export class HighClient {
   readonly config: ResolvedConfig;
 
   readonly auth: AuthResource;
+  readonly instruments: InstrumentsResource;
   readonly market: MarketResource;
   readonly orders: OrdersResource;
   readonly portfolio: PortfolioResource;
@@ -29,6 +31,7 @@ export class HighClient {
   constructor(options: HighClientOptions = {}) {
     this.config = resolveConfig(options);
     this.auth = new AuthResource(this.config);
+    this.instruments = new InstrumentsResource(this.config);
     this.market = new MarketResource(this.config);
     this.orders = new OrdersResource(this.config);
     this.portfolio = new PortfolioResource(this.config);

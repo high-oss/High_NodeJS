@@ -149,7 +149,9 @@ describe('credential containment', () => {
 
   it('does not serialise credentials through a resource either', () => {
     const client = new HighClient({ accessToken: 'SECRET-TOKEN', apiKey: 'SECRET-KEY' });
-    for (const resource of [client.auth, client.orders, client.portfolio, client.scrips, client.market]) {
+    for (const resource of [
+      client.auth, client.instruments, client.orders, client.portfolio, client.scrips, client.market,
+    ]) {
       const serialised = JSON.stringify(resource);
       expect(serialised).not.toContain('SECRET-TOKEN');
       expect(serialised).not.toContain('SECRET-KEY');
