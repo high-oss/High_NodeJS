@@ -20,6 +20,13 @@ export const ENVIRONMENTS = {
 
 export type Environment = keyof typeof ENVIRONMENTS;
 
+/**
+ * The CDN host the instrument list normally downloads from. Baked in as the
+ * default allowlist entry so a compromised or mis-served download URL is
+ * refused rather than silently followed.
+ */
+export const DEFAULT_INSTRUMENT_HOSTS = ['high-space.blr1.cdn.digitaloceanspaces.com'] as const;
+
 export interface HighClientOptions {
   /** Which HIGH environment to talk to. Ignored when `baseUrl` is set. Default: production. */
   environment?: Environment;
@@ -54,6 +61,12 @@ export interface HighClientOptions {
   logSink?: LogSink;
   /** Transport override, for tests or a proxy-aware fetch. */
   fetch?: typeof globalThis.fetch;
+  /**
+   * Hosts the SDK will download instrument list files from. A download URL
+   * whose host is not on this list is refused before any request is made.
+   * Default: the host HIGH publishes them from.
+   */
+  instrumentsAllowedHosts?: string[];
 }
 
 export interface ResolvedConfig {
@@ -71,6 +84,7 @@ export interface ResolvedConfig {
   /** Ready to use; already honours `logLevel`. */
   logger: Logger;
   fetch: typeof globalThis.fetch;
+  instrumentsAllowedHosts: string[];
 }
 
 const DEFAULT_USER_AGENT = 'high-sdk-node/0.0.1';
@@ -148,6 +162,10 @@ export function resolveConfig(
   const timeoutMs = requirePositive(options.timeoutMs ?? 30_000, 'timeoutMs');
   const maxRetries = requireNonNegative(options.maxRetries ?? 2, 'maxRetries');
   const maxRetryDelayMs = requirePositive(options.maxRetryDelayMs ?? 30_000, 'maxRetryDelayMs');
+  const instrumentsAllowedHosts = requireHosts(
+    options.instrumentsAllowedHosts ?? [...DEFAULT_INSTRUMENT_HOSTS],
+    'instrumentsAllowedHosts',
+  );
 
   const config: ResolvedConfig = {
     logLevel,
@@ -160,6 +178,7 @@ export function resolveConfig(
     maxRetryDelayMs,
     userAgent,
     fetch: options.fetch ?? globalThis.fetch,
+    instrumentsAllowedHosts,
   };
 
   // Credentials are defined non-enumerably so they survive neither
@@ -181,6 +200,13 @@ function requirePositive(value: number, name: string): number {
 function requireNonNegative(value: number, name: string): number {
   if (!Number.isInteger(value) || value < 0) {
     throw new Error(`${name} must be a non-negative integer, received ${value}.`);
+  }
+  return value;
+}
+
+function requireHosts(value: string[], name: string): string[] {
+  if (!Array.isArray(value) || value.length === 0 || value.some((host) => !host)) {
+    throw new Error(`${name} must be a non-empty array of hostnames, received ${JSON.stringify(value)}.`);
   }
   return value;
 }
