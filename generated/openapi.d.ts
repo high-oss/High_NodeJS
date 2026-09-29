@@ -512,6 +512,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/instruments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Instrument list
+         * @description Where to download the instrument list (the scrip master): a CSV of every scrip HIGH knows, per category. Use it to look up the `tradingSymbol` the trading and data operations take.
+         *
+         *     This operation needs no credentials, and neither do the files it points at. The files are rebuilt every trading weekday by about 08:40 IST and do not change intraday — download once a day and cache.
+         */
+        get: operations["instruments"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1184,6 +1206,76 @@ export interface components {
              * @example 36
              */
             maxOrderLots: number;
+        };
+        /** @description One downloadable instrument list. `bytes` and `checksum` describe exactly what the URL served when the list was built, so a caller can verify a download and skip one it already holds. */
+        InstrumentFile: {
+            /**
+             * @description Which scrips this file covers.
+             * @example equity
+             * @enum {string}
+             */
+            instrument: "all" | "equity" | "derivatives" | "commodity" | "etfs";
+            /**
+             * Format: uri
+             * @description Direct HTTPS download. Needs no API key and no access token. Treat it as opaque and read it from here rather than hardcoding it — it can move.
+             * @example https://high-space.blr1.cdn.digitaloceanspaces.com/scrip-master/scrip-master-equity.csv
+             */
+            url: string;
+            /**
+             * @description Size of the file in bytes.
+             * @example 860876
+             */
+            bytes: number;
+            /**
+             * @description Data rows, excluding the header.
+             * @example 7912
+             */
+            rows: number;
+            /**
+             * @description MD5 of the file contents, hex encoded.
+             * @example 771b15b7351dbf791ec181da97dc1206
+             */
+            checksum: string;
+            /**
+             * Format: date-time
+             * @description When this file was last published.
+             * @example 2026-09-29T02:53:09.000Z
+             */
+            updatedAt: string;
+        };
+        /** @description Where to download the instrument list (the scrip master) and what each file contains. Rebuilt every trading weekday by about 08:40 IST; it does not change intraday, so download once a day and cache it. */
+        InstrumentsManifest: {
+            /**
+             * Format: date-time
+             * @description When this manifest was built.
+             * @example 2026-09-29T02:53:10.000Z
+             */
+            generatedAt: string;
+            /**
+             * @description The CSV header, in file order. Validate a downloaded file's header against this rather than assuming a fixed column order.
+             * @example [
+             *       "exchange",
+             *       "segment",
+             *       "instrument",
+             *       "high_trading_symbol",
+             *       "scrip_key",
+             *       "isin",
+             *       "scrip_code",
+             *       "symbol",
+             *       "name",
+             *       "group_series",
+             *       "has_fno",
+             *       "underlying_symbol",
+             *       "expiry",
+             *       "option_type",
+             *       "strike_price",
+             *       "price_tick",
+             *       "lot_size"
+             *     ]
+             */
+            columns: string[];
+            /** @description One entry per published category. */
+            files: components["schemas"]["InstrumentFile"][];
         };
     };
     responses: never;
@@ -3609,6 +3701,107 @@ export interface operations {
                     "application/json": {
                         requestId: string;
                         data: components["schemas"]["OptionChain"];
+                    };
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    instruments: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "requestId": "a1b2c3",
+                     *       "data": {
+                     *         "generatedAt": "2026-09-29T02:53:10.000Z",
+                     *         "columns": [
+                     *           "exchange",
+                     *           "segment",
+                     *           "instrument",
+                     *           "high_trading_symbol",
+                     *           "scrip_key",
+                     *           "isin",
+                     *           "scrip_code",
+                     *           "symbol",
+                     *           "name",
+                     *           "group_series",
+                     *           "has_fno",
+                     *           "underlying_symbol",
+                     *           "expiry",
+                     *           "option_type",
+                     *           "strike_price",
+                     *           "price_tick",
+                     *           "lot_size"
+                     *         ],
+                     *         "files": [
+                     *           {
+                     *             "instrument": "all",
+                     *             "url": "https://high-space.blr1.cdn.digitaloceanspaces.com/scrip-master/scrip-master.csv",
+                     *             "bytes": 14023116,
+                     *             "rows": 128431,
+                     *             "checksum": "771b15b7351dbf791ec181da97dc1206",
+                     *             "updatedAt": "2026-09-29T02:53:09.000Z"
+                     *           },
+                     *           {
+                     *             "instrument": "equity",
+                     *             "url": "https://high-space.blr1.cdn.digitaloceanspaces.com/scrip-master/scrip-master-equity.csv",
+                     *             "bytes": 860876,
+                     *             "rows": 7912,
+                     *             "checksum": "771b15b7351dbf791ec181da97dc1206",
+                     *             "updatedAt": "2026-09-29T02:53:09.000Z"
+                     *           },
+                     *           {
+                     *             "instrument": "derivatives",
+                     *             "url": "https://high-space.blr1.cdn.digitaloceanspaces.com/scrip-master/scrip-master-derivatives.csv",
+                     *             "bytes": 11206183,
+                     *             "rows": 102308,
+                     *             "checksum": "771b15b7351dbf791ec181da97dc1206",
+                     *             "updatedAt": "2026-09-29T02:53:09.000Z"
+                     *           },
+                     *           {
+                     *             "instrument": "commodity",
+                     *             "url": "https://high-space.blr1.cdn.digitaloceanspaces.com/scrip-master/scrip-master-commodity.csv",
+                     *             "bytes": 1881018,
+                     *             "rows": 17512,
+                     *             "checksum": "771b15b7351dbf791ec181da97dc1206",
+                     *             "updatedAt": "2026-09-29T02:53:09.000Z"
+                     *           },
+                     *           {
+                     *             "instrument": "etfs",
+                     *             "url": "https://high-space.blr1.cdn.digitaloceanspaces.com/scrip-master/scrip-master-etfs.csv",
+                     *             "bytes": 74393,
+                     *             "rows": 699,
+                     *             "checksum": "771b15b7351dbf791ec181da97dc1206",
+                     *             "updatedAt": "2026-09-29T02:53:09.000Z"
+                     *           }
+                     *         ]
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        requestId: string;
+                        data: components["schemas"]["InstrumentsManifest"];
                     };
                 };
             };

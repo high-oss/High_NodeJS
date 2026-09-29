@@ -11,7 +11,7 @@ describe('generated types', () => {
     const operations = Object.values(spec.paths as Record<string, Record<string, unknown>>)
       .flatMap((item) => Object.keys(item))
       .filter((key) => ['get', 'post', 'put', 'delete', 'patch'].includes(key));
-    expect(operations).toHaveLength(27);
+    expect(operations).toHaveLength(28);
   });
 
   it('exposes the shared component schemas the facades return', () => {
